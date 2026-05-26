@@ -21,6 +21,19 @@ export const EXPANDED_WIDTHS: Record<DeviceType, number> = {
   imac: 680,
 }
 
+// height/width ratios from actual image dimensions (iphone 350×350, macbook 882×1920, imac 600×800)
+export const DEVICE_ASPECT_HW: Record<DeviceType, number> = {
+  iphone:  1.0,
+  macbook: 882 / 1920,
+  imac:    600 / 800,
+}
+
+export const MOBILE_EXPANDED_WIDTHS: Record<DeviceType, number> = {
+  iphone:  200,
+  macbook: 280,
+  imac:    300,
+}
+
 export const projects: Project[] = [
   {
     id: 'process-9',

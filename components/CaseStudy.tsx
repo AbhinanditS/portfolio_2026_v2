@@ -9,7 +9,7 @@ import {
   animate,
   AnimationPlaybackControls,
 } from 'framer-motion'
-import { Project, EXPANDED_WIDTHS } from '@/lib/projects'
+import { Project, EXPANDED_WIDTHS, MOBILE_EXPANDED_WIDTHS, DEVICE_ASPECT_HW } from '@/lib/projects'
 import { DeviceWrapper } from './DeviceWrapper'
 
 const SPRING = { type: 'spring' as const, stiffness: 200, damping: 26 }
@@ -21,27 +21,28 @@ interface Props {
 }
 
 export function CaseStudy({ project, homeRect, onClose }: Props) {
-  const expandedWidth = EXPANDED_WIDTHS[project.device]
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const isMobile = vw < 640
 
-  // Where the expanded device lives (center of right 52% of viewport)
-  const expandedCenterX = window.innerWidth * 0.74
-  const expandedCenterY = window.innerHeight * 0.5
+  const expandedWidth = isMobile ? MOBILE_EXPANDED_WIDTHS[project.device] : EXPANDED_WIDTHS[project.device]
+  const deviceH = expandedWidth * DEVICE_ASPECT_HW[project.device]
+  const topPad = isMobile ? vh * 0.06 : vh * 0.10
 
-  // Where it came from (device card center at click time)
+  // Where the expanded device center lives in viewport coords
+  const expandedCenterX = isMobile ? vw * 0.5 : vw * 0.74
+  const expandedCenterY = topPad + deviceH / 2
+
   const homeCenterX = homeRect.left + homeRect.width / 2
   const homeCenterY = homeRect.top + homeRect.height / 2
 
-  // FLIP deltas and scale ratio
   const deltaX = homeCenterX - expandedCenterX
   const deltaY = homeCenterY - expandedCenterY
   const homeScale = homeRect.width / expandedWidth
+  const dismissDist = Math.max(Math.abs(deltaY), vh * 0.4)
 
-  // How far (in progress units) the user needs to drag — Y-axis governs gesture
-  const dismissDist = Math.max(Math.abs(deltaY), window.innerHeight * 0.4)
-
-  // ─── Single progress value drives every visual ───────────────────────────
-  // 0 = case study open, 1 = back at home card position
-  const progress = useMotionValue(1) // starts at 1, springs to 0 on mount
+  // 0 = case study open, 1 = back at home card
+  const progress = useMotionValue(1)
 
   const deviceX     = useTransform(progress, [0, 1], [0, deltaX])
   const deviceY     = useTransform(progress, [0, 1], [0, deltaY])
@@ -52,41 +53,39 @@ export function CaseStudy({ project, homeRect, onClose }: Props) {
   const bgFilter    = useMotionTemplate`blur(${bgBlurNum}px)`
   const bgColor     = useMotionTemplate`rgba(235,235,235,${bgAlpha})`
 
-  // Ref to running animation so we can interrupt it any time
   const anim = useRef<AnimationPlaybackControls | null>(null)
-  // Ref to the draggable element for cursor manipulation
   const deviceEl = useRef<HTMLDivElement>(null)
 
-  // ─── Mount: spring from home → expanded ──────────────────────────────────
   useEffect(() => {
     anim.current = animate(progress, 0, { ...SPRING })
     return () => anim.current?.stop()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Escape key ──────────────────────────────────────────────────────────
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
 
+  const handleClose = useCallback(() => {
+    anim.current?.stop()
+    anim.current = animate(progress, 1, {
+      ...SPRING,
+      onComplete: () => onCloseRef.current(),
+    })
+  }, [progress])
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      anim.current?.stop()
-      anim.current = animate(progress, 1, {
-        ...SPRING,
-        onComplete: () => onCloseRef.current(),
-      })
+      if (e.key === 'Escape') handleClose()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [progress])
+  }, [handleClose])
 
-  // ─── Gesture state ───────────────────────────────────────────────────────
+  // ── Gesture dismiss ───────────────────────────────────────────────────────
   const isDragging  = useRef(false)
   const startY      = useRef(0)
   const startProg   = useRef(0)
   const velBuf      = useRef<{ p: number; t: number }[]>([])
 
-  // springTo: interrupt current animation, start new spring toward target
   const springTo = useCallback((target: number, vel: number) => {
     anim.current?.stop()
     anim.current = animate(progress, target, {
@@ -98,26 +97,21 @@ export function CaseStudy({ project, homeRect, onClose }: Props) {
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
-    const el = e.currentTarget as HTMLElement
-    el.setPointerCapture(e.pointerId)
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     if (deviceEl.current) deviceEl.current.style.cursor = 'grabbing'
-
-    // Interrupt any running spring — immediately responsive
     anim.current?.stop()
     anim.current = null
-
-    isDragging.current  = true
-    startY.current      = e.clientY
-    startProg.current   = progress.get()
-    velBuf.current      = [{ p: progress.get(), t: performance.now() }]
+    isDragging.current = true
+    startY.current     = e.clientY
+    startProg.current  = progress.get()
+    velBuf.current     = [{ p: progress.get(), t: performance.now() }]
   }, [progress])
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!isDragging.current) return
     const dy = e.clientY - startY.current
-    // Dragging down → toward home (progress 1). Dragging back up → toward expanded (progress 0).
-    const raw     = startProg.current + dy / (dismissDist * 0.65)
-    const clamped = Math.max(-0.1, Math.min(1.1, raw)) // slight overshoot for spring feel
+    const raw = startProg.current + dy / (dismissDist * 0.65)
+    const clamped = Math.max(-0.1, Math.min(1.1, raw))
     progress.set(clamped)
     velBuf.current.push({ p: clamped, t: performance.now() })
     if (velBuf.current.length > 6) velBuf.current.shift()
@@ -128,7 +122,6 @@ export function CaseStudy({ project, homeRect, onClose }: Props) {
     isDragging.current = false
     ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
     if (deviceEl.current) deviceEl.current.style.cursor = 'grab'
-
     const cur = progress.get()
     const samples = velBuf.current.slice(-3)
     let progressVel = 0
@@ -137,38 +130,96 @@ export function CaseStudy({ project, homeRect, onClose }: Props) {
       const dt = (b.t - a.t) / 1000
       progressVel = dt > 0.005 ? (b.p - a.p) / dt : 0
     }
-
-    // px/s equivalent for threshold comparison
-    const pxVel = progressVel * dismissDist * 0.65
-    springTo(pxVel > 320 || cur > 0.4 ? 1 : 0, progressVel)
+    springTo(progressVel * dismissDist * 0.65 > 320 || cur > 0.4 ? 1 : 0, progressVel)
   }, [progress, dismissDist, springTo])
+
+  // ── Layout ────────────────────────────────────────────────────────────────
+  // Device panel: pointer-events none so backdrop click-to-close works on empty areas
+  const devicePanelStyle: React.CSSProperties = isMobile ? {
+    position: 'fixed', top: 0, left: 0, right: 0,
+    height: `${topPad + deviceH + 16}px`,
+    display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+    paddingTop: `${topPad}px`,
+    zIndex: 50, pointerEvents: 'none',
+  } : {
+    position: 'fixed', right: 0, top: 0, width: '52%', height: '100vh',
+    display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+    paddingTop: `${topPad}px`,
+    zIndex: 50, pointerEvents: 'none',
+  }
+
+  // Case study panel: scrollable, no click-through to backdrop
+  const casePanelStyle: React.CSSProperties = isMobile ? {
+    position: 'fixed',
+    top: `${topPad + deviceH + 32}px`,
+    left: 0, right: 0, bottom: 0,
+    overflowY: 'auto',
+    zIndex: 51,
+    padding: '0 6vw 80px',
+  } : {
+    position: 'fixed', left: 0, top: 0,
+    width: '48%', height: '100vh',
+    overflowY: 'auto',
+    zIndex: 51,
+    padding: '80px 6vw 80px',
+  }
 
   return (
     <>
-      {/* Backdrop blur — covers the home page */}
+      {/* Backdrop — click anywhere on grey to close */}
       <motion.div
-        className="fixed inset-0 z-40 pointer-events-none"
+        className="fixed inset-0 z-40"
         style={{ backdropFilter: bgFilter, backgroundColor: bgColor }}
+        onClick={handleClose}
       />
 
-      {/* Left — scrollable case study */}
+      {/* Close button */}
       <motion.div
-        className="fixed left-0 top-0 z-50 h-screen overflow-y-auto pointer-events-none"
-        style={{ width: '48%', opacity: panelOpacity, padding: '80px 6vw 80px' }}
+        style={{
+          position: 'fixed', top: '24px', right: '24px',
+          zIndex: 60, opacity: panelOpacity,
+        }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '56px' }}>
+        <button
+          onClick={handleClose}
+          style={{
+            fontSize: '10px', letterSpacing: '0.14em',
+            textTransform: 'uppercase', fontWeight: 500,
+            opacity: 0.5, padding: '8px 0',
+            transition: 'opacity 0.15s',
+          }}
+          onMouseEnter={(e) => ((e.target as HTMLElement).style.opacity = '1')}
+          onMouseLeave={(e) => ((e.target as HTMLElement).style.opacity = '0.5')}
+        >
+          Close
+        </button>
+      </motion.div>
+
+      {/* Case study — scrolls on left (desktop) or below device (mobile) */}
+      <motion.div style={{ ...casePanelStyle, opacity: panelOpacity }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '36px' : '52px' }}>
           {project.caseStudy.map((s) => (
             <div key={s.label}>
               <span style={{
-                display: 'block', fontSize: '11px', letterSpacing: '0.12em',
-                textTransform: 'uppercase', opacity: 0.5, marginBottom: '10px',
+                display: 'block',
+                fontSize: '10px', letterSpacing: '0.15em',
+                textTransform: 'uppercase', opacity: 0.38,
+                marginBottom: '9px', fontWeight: 500,
               }}>
                 {s.label}
               </span>
-              <h2 style={{ fontSize: '22px', fontWeight: 500, lineHeight: 1.1, marginBottom: '14px' }}>
+              <h2 style={{
+                fontSize: isMobile ? '18px' : '21px',
+                fontWeight: 600, lineHeight: 1.15,
+                letterSpacing: '-0.03em', marginBottom: '12px',
+              }}>
                 {s.heading}
               </h2>
-              <p style={{ fontSize: '15px', lineHeight: 1.55, opacity: 0.65, maxWidth: '60ch' }}>
+              <p style={{
+                fontSize: isMobile ? '13px' : '14px',
+                lineHeight: 1.72, opacity: 0.6,
+                maxWidth: '52ch',
+              }}>
                 {s.body}
               </p>
             </div>
@@ -176,19 +227,15 @@ export function CaseStudy({ project, homeRect, onClose }: Props) {
         </div>
       </motion.div>
 
-      {/* Right — device, draggable to dismiss */}
-      <div
-        className="fixed right-0 top-0 z-50"
-        style={{ width: '52%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      >
+      {/* Device — anchored at top, draggable to dismiss */}
+      <div style={devicePanelStyle}>
         <motion.div
           ref={deviceEl}
           style={{
             x: deviceX, y: deviceY, scale: deviceScale,
             transformOrigin: 'center center',
-            cursor: 'grab',
-            userSelect: 'none',
-            touchAction: 'none',
+            cursor: 'grab', userSelect: 'none', touchAction: 'none',
+            pointerEvents: 'auto',
           }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}

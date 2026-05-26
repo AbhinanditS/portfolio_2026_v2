@@ -14,11 +14,10 @@ interface ExpandedState {
 export default function Page() {
   const [expanded, setExpanded] = useState<ExpandedState | null>(null)
 
-  // Scroll-driven bio blur
   const { scrollY } = useScroll()
-  const bioBlur = useTransform(scrollY, [0, 280], [0, 10])
+  const bioBlur    = useTransform(scrollY, [0, 280], [0, 10])
   const bioOpacity = useTransform(scrollY, [0, 350], [1, 0.2])
-  const bioFilter = useMotionTemplate`blur(${bioBlur}px)`
+  const bioFilter  = useMotionTemplate`blur(${bioBlur}px)`
 
   const handleView = useCallback((project: Project, homeRect: DOMRect) => {
     setExpanded({ project, homeRect })
@@ -36,30 +35,17 @@ export default function Page() {
 
   return (
     <main style={{ position: 'relative', background: '#EBEBEB' }}>
-      {/* ── Bio — fixed, centered, blurs on scroll ── */}
+      {/* Bio — fixed center, blurs on scroll */}
       <motion.div
         style={{
           position: 'fixed',
-          top: '50%',
-          left: '50%',
-          x: '-50%',
-          y: '-50%',
-          zIndex: 1,
-          pointerEvents: 'none',
-          filter: bioFilter,
-          opacity: bioOpacity,
+          top: '50%', left: '50%',
+          x: '-50%', y: '-50%',
+          zIndex: 1, pointerEvents: 'none',
+          filter: bioFilter, opacity: bioOpacity,
         }}
       >
-        <p
-          style={{
-            fontWeight: 400,
-            fontSize: '17px',
-            lineHeight: 1.6,
-            maxWidth: '38ch',
-            color: '#111',
-            textAlign: 'left',
-          }}
-        >
+        <p className="bio-text">
           Hey!
           <br />
           I&apos;m an interaction designer at Bosch, designing for complex B2B
@@ -69,31 +55,19 @@ export default function Page() {
         </p>
       </motion.div>
 
-      {/* ── Scrollable project layer — sits above bio in z-order ── */}
-      <div
-        style={{
-          position: 'relative',
-          zIndex: 2,
-          paddingTop: '95vh',
-          paddingBottom: '40vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '140px',
-          paddingLeft: '6vw',
-          paddingRight: '6vw',
-        }}
-      >
+      {/* Scrollable project list */}
+      <div className="projects-layer">
         {projects.map((project) => (
           <ProjectCard
             key={project.id}
             project={project}
             onView={(rect) => handleView(project, rect)}
+            isExpanded={expanded?.project.id === project.id}
           />
         ))}
       </div>
 
-      {/* ── Case study overlay ── */}
+      {/* Case study overlay */}
       {expanded && (
         <CaseStudy
           project={expanded.project}
