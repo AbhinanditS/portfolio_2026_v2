@@ -9,6 +9,7 @@ import { CaseStudy } from '@/components/CaseStudy'
 interface ExpandedState {
   project: Project
   homeRect: DOMRect
+  initialDragY?: number
 }
 
 export default function Page() {
@@ -19,8 +20,15 @@ export default function Page() {
   const bioOpacity = useTransform(scrollY, [0, 350], [1, 0.2])
   const bioFilter  = useMotionTemplate`blur(${bioBlur}px)`
 
+  // Tap on View → button
   const handleView = useCallback((project: Project, homeRect: DOMRect) => {
     setExpanded({ project, homeRect })
+    document.body.classList.add('locked')
+  }, [])
+
+  // Drag up from card — case study takes over mid-gesture
+  const handleOpenWithDrag = useCallback((project: Project, homeRect: DOMRect, pointerY: number) => {
+    setExpanded({ project, homeRect, initialDragY: pointerY })
     document.body.classList.add('locked')
   }, [])
 
@@ -62,6 +70,7 @@ export default function Page() {
             key={project.id}
             project={project}
             onView={(rect) => handleView(project, rect)}
+            onOpenWithDrag={(rect, py) => handleOpenWithDrag(project, rect, py)}
             isExpanded={expanded?.project.id === project.id}
           />
         ))}
@@ -73,6 +82,7 @@ export default function Page() {
           project={expanded.project}
           homeRect={expanded.homeRect}
           onClose={handleClose}
+          initialDragY={expanded.initialDragY}
         />
       )}
     </main>

@@ -22,9 +22,12 @@ interface Props {
   project: Project
   homeRect: { left: number; top: number; width: number; height: number }
   onClose: () => void
+  /** When the user dragged up from the card to open, pass the Y coordinate so
+   *  the case study takes over mid-drag instead of playing the enter animation. */
+  initialDragY?: number
 }
 
-export function CaseStudy({ project, homeRect, onClose }: Props) {
+export function CaseStudy({ project, homeRect, onClose, initialDragY }: Props) {
   const vw = window.innerWidth
   const vh = window.innerHeight
   const isMobile = vw < 640
@@ -64,8 +67,55 @@ export function CaseStudy({ project, homeRect, onClose }: Props) {
   const deviceEl = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    anim.current = animate(progress, 0, { ...SPRING_OPEN })
-    return () => anim.current?.stop()
+    if (initialDragY !== undefined) {
+      // User dragged up from the card — take over mid-drag via document listeners.
+      // progress starts at 1 (card position); the user's finger controls it.
+      isDragging.current  = true
+      startY.current      = initialDragY
+      startProg.current   = 1
+      velBuf.current      = [{ p: 1, t: performance.now() }]
+
+      const handleMove = (e: PointerEvent) => {
+        if (!isDragging.current) return
+        const dy = e.clientY - startY.current
+        const raw     = startProg.current + dy / (dismissDist * 0.65)
+        const clamped = Math.max(-0.1, Math.min(1.1, raw))
+        progress.set(clamped)
+        velBuf.current.push({ p: clamped, t: performance.now() })
+        if (velBuf.current.length > 6) velBuf.current.shift()
+      }
+
+      const handleUp = () => {
+        if (!isDragging.current) return
+        isDragging.current = false
+        const cur     = progress.get()
+        const samples = velBuf.current.slice(-3)
+        let progressVel = 0
+        if (samples.length >= 2) {
+          const a = samples[0], b = samples[samples.length - 1]
+          const dt = (b.t - a.t) / 1000
+          progressVel = dt > 0.005 ? (b.p - a.p) / dt : 0
+        }
+        const pxVel = progressVel * dismissDist * 0.65
+        // Fast upward fling (pxVel < -320) or dragged past midpoint → open
+        // Fast downward fling or barely moved → cancel back to card
+        const shouldClose = pxVel > 320 || (Math.abs(pxVel) <= 320 && cur > 0.5)
+        springTo(shouldClose ? 1 : 0, progressVel)
+        document.removeEventListener('pointermove', handleMove)
+        document.removeEventListener('pointerup', handleUp)
+      }
+
+      document.addEventListener('pointermove', handleMove)
+      document.addEventListener('pointerup', handleUp)
+      return () => {
+        document.removeEventListener('pointermove', handleMove)
+        document.removeEventListener('pointerup', handleUp)
+      }
+    } else {
+      // Normal tap/click open — spring in from card position
+      anim.current = animate(progress, 0, { ...SPRING_OPEN })
+      return () => anim.current?.stop()
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const onCloseRef = useRef(onClose)
