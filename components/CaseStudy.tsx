@@ -6,13 +6,17 @@ import {
   useMotionValue,
   useTransform,
   useMotionTemplate,
+  useVelocity,
   animate,
   AnimationPlaybackControls,
 } from 'framer-motion'
 import { Project, EXPANDED_WIDTHS, MOBILE_EXPANDED_WIDTHS, DEVICE_ASPECT_HW } from '@/lib/projects'
 import { DeviceWrapper } from './DeviceWrapper'
 
-const SPRING = { type: 'spring' as const, stiffness: 200, damping: 26 }
+// Open: slower, heavier entrance
+const SPRING_OPEN  = { type: 'spring' as const, stiffness: 160, damping: 28, mass: 1.4 }
+// Close: underdamped so the device overshoots the card and bounces — "book hitting a shelf"
+const SPRING_CLOSE = { type: 'spring' as const, stiffness: 320, damping: 20, mass: 1.0 }
 
 interface Props {
   project: Project
@@ -43,21 +47,24 @@ export function CaseStudy({ project, homeRect, onClose }: Props) {
 
   // 0 = case study open, 1 = back at home card
   const progress = useMotionValue(1)
+  // Velocity of progress drives rotation — tilt in direction of travel, wobble on bounce
+  const progressVel = useVelocity(progress)
 
-  const deviceX     = useTransform(progress, [0, 1], [0, deltaX])
-  const deviceY     = useTransform(progress, [0, 1], [0, deltaY])
-  const deviceScale = useTransform(progress, [0, 1], [1, homeScale])
+  const deviceX      = useTransform(progress, [0, 1], [0, deltaX])
+  const deviceY      = useTransform(progress, [0, 1], [0, deltaY])
+  const deviceScale  = useTransform(progress, [0, 1], [1, homeScale])
+  const deviceRotate = useTransform(progressVel, [-5, 0, 5], [3, 0, -3])
   const panelOpacity = useTransform(progress, [0, 0.35], [1, 0])
-  const bgBlurNum   = useTransform(progress, [0, 1], [16, 0])
-  const bgAlpha     = useTransform(progress, [0, 1], [0.55, 0])
-  const bgFilter    = useMotionTemplate`blur(${bgBlurNum}px)`
-  const bgColor     = useMotionTemplate`rgba(235,235,235,${bgAlpha})`
+  const bgBlurNum    = useTransform(progress, [0, 1], [16, 0])
+  const bgAlpha      = useTransform(progress, [0, 1], [0.55, 0])
+  const bgFilter     = useMotionTemplate`blur(${bgBlurNum}px)`
+  const bgColor      = useMotionTemplate`rgba(235,235,235,${bgAlpha})`
 
   const anim = useRef<AnimationPlaybackControls | null>(null)
   const deviceEl = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    anim.current = animate(progress, 0, { ...SPRING })
+    anim.current = animate(progress, 0, { ...SPRING_OPEN })
     return () => anim.current?.stop()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -67,7 +74,7 @@ export function CaseStudy({ project, homeRect, onClose }: Props) {
   const handleClose = useCallback(() => {
     anim.current?.stop()
     anim.current = animate(progress, 1, {
-      ...SPRING,
+      ...SPRING_CLOSE,
       onComplete: () => onCloseRef.current(),
     })
   }, [progress])
@@ -88,8 +95,9 @@ export function CaseStudy({ project, homeRect, onClose }: Props) {
 
   const springTo = useCallback((target: number, vel: number) => {
     anim.current?.stop()
+    const cfg = target === 1 ? SPRING_CLOSE : SPRING_OPEN
     anim.current = animate(progress, target, {
-      ...SPRING,
+      ...cfg,
       velocity: vel,
       onComplete: target === 1 ? () => onCloseRef.current() : undefined,
     })
@@ -232,7 +240,7 @@ export function CaseStudy({ project, homeRect, onClose }: Props) {
         <motion.div
           ref={deviceEl}
           style={{
-            x: deviceX, y: deviceY, scale: deviceScale,
+            x: deviceX, y: deviceY, scale: deviceScale, rotate: deviceRotate,
             transformOrigin: 'center center',
             cursor: 'grab', userSelect: 'none', touchAction: 'none',
             pointerEvents: 'auto',
