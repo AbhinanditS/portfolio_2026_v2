@@ -1,6 +1,7 @@
 'use client'
 
-import { useRef } from 'react'
+import { useRef, useCallback } from 'react'
+import { motion, useMotionValue, useTransform, animate } from 'framer-motion'
 import { Project } from '@/lib/projects'
 import { DeviceWrapper } from './DeviceWrapper'
 
@@ -10,26 +11,89 @@ const CARD_WIDTHS: Record<string, number> = {
   imac:    460,
 }
 
+// Bouncy snap-back spring for the downward drag release
+const SNAP = { type: 'spring' as const, stiffness: 320, damping: 20, mass: 1.0 }
+
 interface Props {
   project: Project
   onView: (rect: DOMRect) => void
+  onOpenWithDrag: (rect: DOMRect, pointerY: number) => void
   isExpanded?: boolean
 }
 
-export function ProjectCard({ project, onView, isExpanded }: Props) {
+export function ProjectCard({ project, onView, onOpenWithDrag, isExpanded }: Props) {
   const deviceRef = useRef<HTMLDivElement>(null)
+  const dragActive  = useRef(false)
+  const startY      = useRef(0)
+  const didOpenUp   = useRef(false)   // guard against click firing after drag
 
-  const handleView = () => {
-    if (deviceRef.current) {
-      onView(deviceRef.current.getBoundingClientRect())
+  // Downward drag: 0 = normal, 1 = max pull-down
+  const downDrag   = useMotionValue(0)
+  const scaleDown  = useTransform(downDrag, [0, 1], [1, 0.62])
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    if (isExpanded) return
+    e.preventDefault()
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    dragActive.current  = true
+    didOpenUp.current   = false
+    startY.current      = e.clientY
+  }, [isExpanded])
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragActive.current || didOpenUp.current) return
+    const dy = e.clientY - startY.current
+
+    if (dy < -8) {
+      // ── Upward drag past threshold: hand off to case study ──
+      didOpenUp.current = true
+      dragActive.current = false
+      ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+      downDrag.set(0)
+      if (deviceRef.current) {
+        onOpenWithDrag(deviceRef.current.getBoundingClientRect(), e.clientY)
+      }
+      return
     }
-  }
+
+    if (dy > 0) {
+      // ── Downward drag: rubber-band scale-down ──
+      // Resistance increases as you pull further
+      const pull = dy / 300
+      downDrag.set(Math.min(pull / (1 + pull * 0.4), 1))
+    } else {
+      downDrag.set(0)
+    }
+  }, [downDrag, onOpenWithDrag])
+
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!dragActive.current) return
+    dragActive.current = false
+    ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    // Spring back with a little bounce
+    animate(downDrag, 0, SNAP)
+  }, [downDrag])
 
   return (
     <div className="card-layout">
-      <div ref={deviceRef} style={{ visibility: isExpanded ? 'hidden' : 'visible', flexShrink: 0 }}>
+      <motion.div
+        ref={deviceRef}
+        style={{
+          visibility: isExpanded ? 'hidden' : 'visible',
+          flexShrink: 0,
+          scale: scaleDown,
+          transformOrigin: 'center bottom',
+          cursor: 'grab',
+          touchAction: 'none',
+          userSelect: 'none',
+        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
         <DeviceWrapper type={project.device} width={CARD_WIDTHS[project.device]} />
-      </div>
+      </motion.div>
 
       <div className="card-info" style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
         <span style={{
@@ -62,7 +126,10 @@ export function ProjectCard({ project, onView, isExpanded }: Props) {
           {project.desc}
         </p>
         <button
-          onClick={handleView}
+          onClick={() => {
+            if (didOpenUp.current) return
+            if (deviceRef.current) onView(deviceRef.current.getBoundingClientRect())
+          }}
           style={{
             marginTop: '14px',
             fontSize: '10px',
